@@ -1,1 +1,2 @@
 alpine
+ghcr.io/mealie-recipes/mealie:latest
