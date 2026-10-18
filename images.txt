@@ -1,1 +1,1 @@
-aiursoft/how-to-cookviewer:latest
+ghcr.io/anduin2017/how-to-cook:latest
