@@ -1,2 +1,1 @@
-alpine
-ghcr.io/mealie-recipes/mealie:latest
+aiursoft/how-to-cookviewer:latest
