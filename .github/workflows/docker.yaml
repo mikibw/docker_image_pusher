@@ -28,7 +28,7 @@ jobs:
 
     - name: Process and Sync Images
       run: |
-        # 1. 预处理判断镜像名是否重名（完全保留你原有的去重与命名空间拼接逻辑）
+        # 1. 预处理判断镜像名是否重名（完全保留您原有的去重与命名空间拼接逻辑）
         declare -A duplicate_images
         declare -A temp_map
         while IFS= read -r line || [ -n "$line" ]; do
@@ -70,12 +70,12 @@ jobs:
             new_image="$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE/$name_space_prefix$image_name_tag"
             
             echo "--------------------------------------------------------"
-            echo "正在无损复制多架构镜像..."
+            echo "正在无损复制多架构镜像清单..."
             echo "源镜像: $image"
             echo "目标镜像: $new_image"
             
-            # 使用 Buildx 将源仓库的所有多架构无损直接同步至阿里云
-            docker buildx imagetools cp $image $new_image
+            # 修复点：使用标准的 imagetools create 命令，完美兼顾速度、稳定性与多架构（含 ARM64）
+            docker buildx imagetools create --tag "$new_image" "$image"
             
             echo "同步完成！"
             
