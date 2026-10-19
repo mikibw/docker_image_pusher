@@ -1,1 +1,1 @@
-aiursoft/howtocookviewer
+--platform linux/arm64 aiursoft/howtocookviewer
