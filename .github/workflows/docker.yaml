@@ -13,70 +13,66 @@ env:
 
 jobs:
   sync:
-    name: Sync Multi-Arch Images
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      - name: Install Skopeo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
 
-    - name: Login to Aliyun Registry
-      run: |
-        echo "$ALIYUN_REGISTRY_PASSWORD" | docker login $ALIYUN_REGISTRY -u "$ALIYUN_REGISTRY_USER" --password-stdin
+      - name: Login to Aliyun Registry
+        run: |
+          echo "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}" | skopeo login ${{ secrets.ALIYUN_REGISTRY }} \
+            -u "${{ secrets.ALIYUN_REGISTRY_USER }}" --password-stdin
 
-    - name: Process and Sync Images
-      run: |
-        # 1. 预处理判断镜像名是否重名（完全保留您原有的去重与命名空间拼接逻辑）
-        declare -A duplicate_images
-        declare -A temp_map
-        while IFS= read -r line || [ -n "$line" ]; do
-            [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+      - name: Sync Images
+        run: |
+          # 检查 images.txt 是否存在
+          if [ ! -f "images.txt" ]; then
+            echo "Error: images.txt not found!"
+            exit 1
+          fi
+
+          # 循环读取其中的镜像
+          while IFS= read -r source_image || [ -n "$source_image" ]; do
+            # 忽略空行和注释行
+            [[ -z "$source_image" || "$source_image" =~ ^# ]] && continue
             
-            image=$(echo "$line" | awk '{print $NF}')
-            image="${image%%@*}"
-            image_name_tag=$(echo "$image" | awk -F'/' '{print $NF}')
-            name_space=$(echo "$image" | awk -F'/' '{if (NF==3) print $2; else if (NF==2) print $1; else print ""}')
-            name_space="${name_space}_"
-            image_name=$(echo "$image_name_tag" | awk -F':' '{print $1}')
+            # 去除前后的空格
+            source_image=$(echo "$source_image" | xargs)
             
-            if [[ -n "${temp_map[$image_name]}" ]]; then
-                 if [[ "${temp_map[$image_name]}" != $name_space  ]]; then
-                    duplicate_images[$image_name]="true"
-                 fi
+            echo "--------------------------------------------------"
+            echo "Processing image: $source_image"
+            
+            # 提取镜像名称和标签 (例如 library/nginx:latest 或 ubuntu:20.04)
+            if [[ "$source_image" == */*/* ]]; then
+              image_name_tag=$(echo "$source_image" | cut -d'/' -f2-)
+            elif [[ "$source_image" == */* ]]; then
+              image_name_tag="$source_image"
             else
-                temp_map[$image_name]=$name_space
-            fi       
-        done < images.txt
-        
-        # 2. 核心多架构无损克隆逻辑
-        while IFS= read -r line || [ -n "$line" ]; do
-            [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-        
-            image=$(echo "$line" | awk '{print $NF}')
-            image_name_tag=$(echo "$image" | awk -F'/' '{print $NF}')
-            image_name_tag="${image_name_tag%%@*}"
-            name_space=$(echo "$image" | awk -F'/' '{if (NF==3) print $2; else if (NF==2) print $1; else print ""}')
-            image_name=$(echo "$image_name_tag" | awk -F':' '{print $1}')
-        
-            # 处理重名前缀
-            name_space_prefix=""
-            if [[ -n "${duplicate_images[$image_name]}" && -n "${name_space}" ]]; then
-               name_space_prefix="${name_space}_"
+              image_name_tag="library/$source_image"
             fi
             
-            # 拼接阿里云目标镜像全称
-            new_image="$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE/$name_space_prefix$image_name_tag"
+            # 目标阿里云镜像地址
+            target_image="${{ secrets.ALIYUN_REGISTRY }}/${{ secrets.ALIYUN_NAME_SPACE }}/${image_name_tag}"
+            echo "Target Aliyun image: $target_image"
             
-            echo "--------------------------------------------------------"
-            echo "正在无损复制多架构镜像清单..."
-            echo "源镜像: $image"
-            echo "目标镜像: $new_image"
+            # 检查目标镜像是否已存在（去重检查）
+            if skopeo inspect docker://$target_image > /dev/null 2>&1; then
+              echo "✅ Image $target_image already exists. Skipping..."
+              continue
+            fi
             
-            # 修复点：使用标准的 imagetools create 命令，完美兼顾速度、稳定性与多架构（含 ARM64）
-            docker buildx imagetools create --tag "$new_image" "$image"
-            
-            echo "同步完成！"
-            
-        done < images.txt
+            # 执行多架构同步 (--all 会包含 amd64, arm64 等所有架构)
+            echo "🚀 Syncing $source_image to $target_image ..."
+            if skopeo copy --all docker://$source_image docker://$target_image; then
+              echo "🎉 Successfully synced $image_name_tag"
+            else
+              echo "❌ Failed to sync $image_name_tag"
+              exit 1
+            fi
+
+          done < images.txt
