@@ -1,7 +1,8 @@
 name: Docker
 on:
   workflow_dispatch:
-  push: branches: [ main ]
+  push:
+    branches: [ main ]
 env:
   ALIYUN_REGISTRY: "${{ secrets.ALIYUN_REGISTRY }}"
   ALIYUN_NAME_SPACE: "${{ secrets.ALIYUN_NAME_SPACE }}"
@@ -9,7 +10,7 @@ env:
   ALIYUN_REGISTRY_PASSWORD: "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}"
 jobs:
   build:
-    name: Pull
+    name: Pull & Sync
     runs-on: ubuntu-latest
     steps:
       - name: Before freeing up disk space
@@ -18,6 +19,7 @@ jobs:
           echo "=============================================================================="
           df -hT
           echo "=============================================================================="
+      
       # 增加可用磁盘空间
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
@@ -27,96 +29,95 @@ jobs:
           remove-dotnet: 'true'
           remove-haskell: 'true'
           build-mount-path: '/var/lib/docker/'
+          
       - name: Restart docker
         run: sudo service docker restart
+        
       - name: Free up disk space complete
         run: |
           echo "Free up disk space complete"
           echo "=============================================================================="
           df -hT
           echo "=============================================================================="
+          
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # =================【最小化改动 1: 新增多架构环境】=================
+      # 关键修改 1：引入 QEMU 模拟器，使系统能够处理 arm64 等非常规架构
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+
+      # 关键修改 2：设置 Buildx 构建器
       - name: Docker Setup Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container # 必须使用 container 驱动才能支持多架构 build
 
-      # =================【核心业务逻辑，完全保留你原有的变量和文本处理】=================
       - name: Build and push image Aliyun
         run: |
           docker login -u $ALIYUN_REGISTRY_USER -p $ALIYUN_REGISTRY_PASSWORD $ALIYUN_REGISTRY
           
-          # 数据预处理,判断镜像是否重名 (100% 保留你原有的代码)
+          # 数据预处理,判断镜像是否重名
           declare -A duplicate_images
           declare -A temp_map
+          
           while IFS= read -r line || [ -n "$line" ]; do
             [[ -z "$line" ]] && continue
-            if echo "$line" | grep -q '^\s*#'; then continue; fi
+            if echo "$line" | grep -q '^\s*#'; then continue fi
+            
             image=$(echo "$line" | awk '{print $NF}')
             image="${image%%@*}"
             image_name_tag=$(echo "$image" | awk -F'/' '{print $NF}')
             name_space=$(echo "$image" | awk -F'/' '{if (NF==3) print $2; else if (NF==2) print $1; else print ""}')
             name_space="${name_space}_"
             image_name=$(echo "$image_name_tag" | awk -F':' '{print $1}')
+            
             if [[ -n "${temp_map[$image_name]}" ]]; then
               if [[ "${temp_map[$image_name]}" != $name_space ]]; then
-                echo "duplicate image name: $image_name"
                 duplicate_images[$image_name]="true"
               fi
             else
               temp_map[$image_name]=$name_space
             fi
           done < images.txt
-
-          # 开始处理和推送镜像
+          
+          # 开始循环同步镜像
           while IFS= read -r line || [ -n "$line" ]; do
             [[ -z "$line" ]] && continue
-            if echo "$line" | grep -q '^\s*#'; then continue; fi
+            if echo "$line" | grep -q '^\s*#'; then continue fi
             
-            # 这里保留你原有的 platform 解析，兼容你在 txt 里写的 --platform 参数
+            # 关键修改 3：解析行内是否有自定义的 --platform 参数。如果 images.txt 没写，默认拉取常用架构
             platform=$(echo "$line" | awk -F'--platform[ =]' '{if (NF>1) print $2}' | awk '{print $1}')
+            if [ -z "$platform" ]; then
+              # 如果没有指定平台，默认拉取并打包 linux/amd64 和 linux/arm64
+              platform="linux/amd64,linux/arm64"
+            fi
             
-            # 原有变量提取 (100% 保留你原来的逻辑)
             image=$(echo "$line" | awk '{print $NF}')
             image_name_tag=$(echo "$image" | awk -F'/' '{print $NF}')
             name_space=$(echo "$image" | awk -F'/' '{if (NF==3) print $2; else if (NF==2) print $1; else print ""}')
             image_name=$(echo "$image_name_tag" | awk -F':' '{print $1}')
+            
             name_space_prefix=""
             if [[ -n "${duplicate_images[$image_name]}" ]]; then
               if [[ -n "${name_space}" ]]; then
                 name_space_prefix="${name_space}_"
               fi
             fi
+            
             image_name_tag="${image_name_tag%%@*}"
-            
-            # 融合为原生多架构 Tag 时，不需要在镜像名上强行加架构前缀，直接生成目标镜像名
+            # 统一多架构后，我们不再把架构名（如 amd64_）拼进镜像名，直接用原名即可保持整洁
             new_image="$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE/$name_space_prefix$image_name_tag"
-
-            # =================【最小化改动 2: 替换原有的 pull/tag/push】=================
-            # 如果 images.txt 里指定了特定单架构，我们只同步那一个架构；
-            # 如果没指定，imagetools 会自动把源镜像持有的【所有架构】打包成一个 Manifest 列表，一次性同步到阿里云。
-            echo "正在通过 Manifest 同步多架构镜像: $image -> $new_image"
             
-            if [ -z "$platform" ]; then
-              # 没指定 platform：直接拉取所有架构并融合成一个 Tag 推送
-              docker buildx imagetools create -t "$new_image" "$image"
-            else
-              # 指定了 platform：利用 Buildx 在内存中抓取特定架构并推送
-              echo "FROM --platform=$platform $image" | docker buildx build --platform "$platform" -t "$new_image" --push -f - .
-            fi
-
-            # 原有磁盘清理日志 (保持原样)
-            echo "开始清理磁盘空间"
-            echo "=============================================================================="
-            df -hT
-            echo "=============================================================================="
-            # 释放 buildx 缓存
+            echo "正在多架构同步: $image -> $new_image 平台: $platform"
+            
+            # 创建一个临时的 Dockerfile，通过 Buildx 直接跨架构拉取并推送
+            # 这种方式不会在 runner 本地留下零散的单个架构标签，而是作为多架构 Manifest 直接提交到阿里云
+            echo "FROM --platform=\$TARGETPLATFORM $image" | docker buildx build \
+              --platform "$platform" \
+              -t "$new_image" \
+              --push -f - .
+              
+            echo "开始清理本地 Buildx 缓存"
             docker buildx prune -f
-            echo "磁盘空间清理完毕"
-            echo "=============================================================================="
-            df -hT
-            echo "=============================================================================="
           done < images.txt
