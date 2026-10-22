@@ -1,2 +1,3 @@
 --platform linux/arm64 aiursoft/howtocookviewer
 --platform linux/arm64 liwei2633/gopeed
+--platform linux/arm64 lscr.io/linuxserver/qbittorrent
