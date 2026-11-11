@@ -1,0 +1,18 @@
+name: Temp Base64 Output
+
+# 允许手动在网页端触发运行
+on:
+  workflow_dispatch:
+
+jobs:
+  print-secret:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print Base64 encoded secret
+        env:
+          # 把下面的 YOUR_SECRET_NAME 替换成你实际的 Secret 名字
+          MY_SECRET: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+        run: |
+          # 使用 -w 0 防止长字符串自动换行，方便完整复制
+          echo -n "$MY_SECRET" | base64 -w 0
+          echo ""
