@@ -1,7 +1,2 @@
---platform linux/arm64 aiursoft/howtocookviewer
 --platform linux/arm64 liwei2633/gopeed
---platform linux/arm64 lscr.io/linuxserver/qbittorrent
---platform linux/arm64 p3terx/aria2-pro
---platform linux/arm64 p3terx/ariang
---platform linux/arm64 ghcr.io/alexta69/metube
-—-platform linux/arm64 ghcr.io/franklioxygen/mytube
+--platform linux/arm64 ghcr.io/franklioxygen/mytube
