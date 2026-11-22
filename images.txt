@@ -1,4 +1,2 @@
---platform linux/arm64 liwei2633/gopeed
---platform linux/arm64 ghcr.io/franklioxygen/mytube:latest
---platform linux/arm64 ghcr.io/alexta69/metube:latest
---platform linux/arm64 gogost/gost
+--platform linux/arm64 ghcr.io/franklioxygen/mytube
+--platform linux/arm64 ghcr.io/alexta69/metube
